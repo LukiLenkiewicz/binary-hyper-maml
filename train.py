@@ -7,7 +7,7 @@ from copy import deepcopy
 import numpy as np
 import torch
 import random
-from neptune.new import Run
+from neptune import Run
 import torch.optim
 import torch.optim.lr_scheduler as lr_scheduler
 import os
@@ -27,8 +27,6 @@ from methods.hypernets.bayeshmaml import BayesHMAML
 from methods.hypernets.hypermaml import HyperMAML
 from methods.hypernets.binarymaml import BinaryHyperMAML
 from io_utils import model_dict, parse_args, get_resume_file, setup_neptune
-
-from neptune.new.types import File
 
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -123,7 +121,7 @@ def train(base_loader, val_loader, model, optimization, start_epoch, stop_epoch,
         metrics = model.train_loop(epoch, base_loader, optimizer)
 
         scheduler.step()
-        model.eval()
+        # model.eval()
 
         delta_params = metrics.pop('delta_params', None)
         if delta_params is not None:
@@ -142,7 +140,7 @@ def train(base_loader, val_loader, model, optimization, start_epoch, stop_epoch,
                 f"Epoch {epoch}/{stop_epoch}  | Max test acc {max_acc:.2f} | Test acc {acc:.2f} | Metrics: {test_loop_metrics}")
 
             metrics = metrics or dict()
-            metrics["lr"] = scheduler.get_lr()
+            metrics["lr"] = scheduler.get_lr()[0]
             metrics["accuracy/val"] = acc
             metrics["accuracy/val_max"] = max_acc
             metrics["accuracy/train_max"] = max_train_acc
@@ -202,7 +200,7 @@ def train(base_loader, val_loader, model, optimization, start_epoch, stop_epoch,
 
             if neptune_run is not None:
                 for m, v in metrics.items():
-                    neptune_run[m].log(v, step=epoch)
+                    neptune_run[m].append(v, step=epoch)
 
     if neptune_run is not None:
         neptune_run["best_model"].track_files(os.path.join(params.checkpoint_dir, 'best_model.tar'))
