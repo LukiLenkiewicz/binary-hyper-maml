@@ -36,8 +36,11 @@ class BinaryHyperMAML(HyperMAML):
         self.temp_diff = self.start_temp - self.end_temp
 
         hypernet_layers = [self.bm_layer_size for _ in range(self.bm_num_layers)]
-        self.feature_query = model_func()
 
+        if self.bm_method == "two_encoders":
+            self.feature_query = model_func()
+        elif self.bm_method == "one_encoder":
+            self.feature_query = self.feature
 
         backbone_shapes = [list(layer.shape) for layer in self.feature_query.parameters()]
         classifier_shapes = [list(layer.shape) for layer in self.classifier.parameters()]
@@ -50,6 +53,9 @@ class BinaryHyperMAML(HyperMAML):
                 layers=hypernet_layers, chunk_size=self.bm_chunk_size, num_cond_embs=1)
 
     def get_hn_delta_params(self, support_embeddings):
+        if self.bm_method == "one_encoder":
+            support_embeddings = support_embeddings.detach()
+
         support_embeddings_resh = support_embeddings.reshape(1, -1)
         delta_params = self.hypernet(support_embeddings_resh)
 
@@ -174,7 +180,7 @@ class BinaryHyperMAML(HyperMAML):
             return [torch.zeros(*i).cuda() for (_, i) in self.target_net_param_shapes.items()]
 
     def forward(self, x):
-        out = self.feature_query.forward(x)
+        out = self.extract_query_features(x)
 
         scores = self.classifier.forward(out)
         return scores
@@ -219,3 +225,8 @@ class BinaryHyperMAML(HyperMAML):
                 return scores, total_delta_sum
             else:
                 return scores, None
+
+    def extract_query_features(self, x):
+        if self.bm_method == "two_encoders":
+            return self.feature_query(x)
+        return self.feature(x)

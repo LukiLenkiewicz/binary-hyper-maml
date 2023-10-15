@@ -78,7 +78,7 @@ def add_hn_args_to_parser(parser: ArgumentParser) -> ArgumentParser:
 
     #Binary MAML args
     binarymaml_args = parser.add_argument_group("Binary MAML arguments")
-    binarymaml_args.add_argument("--bm_method", default='two_encoders', choices=['one_encoder', 'two_encoders', 'shared_layers'], help="training method choice")
+    binarymaml_args.add_argument("--bm_method", default='two_encoders', choices=['one_encoder', 'two_encoders'], help="training method choice")
     binarymaml_args.add_argument("--bm_activation", default='sigmoid', choices=['linear', 'sigmoid', 'gumbel_softmax', 'tanh'], help="activation function")
     binarymaml_args.add_argument("--bm_layer_size", default=512, type=int, help="size of hypernetwork layers")
     binarymaml_args.add_argument("--bm_num_layers", default=2, type=int, help="num of hypernetwork hidden layers")
