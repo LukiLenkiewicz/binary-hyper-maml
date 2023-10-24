@@ -200,7 +200,7 @@ def single_test(params):
             model.task_update_num = 100 if params.hn_val_epochs == -1 else params.hn_val_epochs
             #We perform adaptation on MAML simply by updating more times.
 
-        model.eval()
+        # model.eval()
         model.single_test = True
 
         if isinstance(model, (MAML, BayesHMAML, HyperMAML)):

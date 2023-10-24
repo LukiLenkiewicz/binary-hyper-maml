@@ -5,14 +5,14 @@ import os
 import json
 import random
 
-#cwd = os.getcwd() 
-#data_path = join(cwd,'CUB_200_2011/images')
-data_path = '/shared/sets/datasets/cub_birds/images'
+cwd = os.getcwd() 
+data_path = join(cwd,'CUB_200_2011/images')
+# data_path = '/shared/sets/datasets/cub_birds/images'
 savedir = './'
 dataset_list = ['base','val','novel']
 
-#if not os.path.exists(savedir):
-#    os.makedirs(savedir)
+if not os.path.exists(savedir):
+   os.makedirs(savedir)
 
 folder_list = [f for f in listdir(data_path) if isdir(join(data_path, f))]
 folder_list.sort()

@@ -75,21 +75,28 @@ def add_hn_args_to_parser(parser: ArgumentParser) -> ArgumentParser:
     bhypermaml_args.add_argument('--kl_stop_val', default=1e-3, type=float, help='final value of kld_scale (default 1e-3)')
     bhypermaml_args.add_argument('--kl_scale', default=1e-24, type=float, help='initial value of kld_scale (default 1e-24)')
 
-
     #Binary MAML args
     binarymaml_args = parser.add_argument_group("Binary MAML arguments")
-    binarymaml_args.add_argument("--bm_method", default='two_encoders', choices=['one_encoder', 'two_encoders'], help="training method choice")
+    binarymaml_args.add_argument("--bm_backbone_weights", action="store_true", help="If true generate fast weights for backbone")
+    binarymaml_args.add_argument("--bm_retain_graph", action="store_true", help="retain graph option in backward")
+    binarymaml_args.add_argument("--bm_detach_embedding", action="store_true", help="detach hypernet input")
+    binarymaml_args.add_argument("--bm_method", default='two_encoders', choices=['one_encoder', 'two_encoders', 'shared_layers'], help="training method choice")
     binarymaml_args.add_argument("--bm_activation", default='sigmoid', choices=['linear', 'sigmoid', 'gumbel_softmax', 'tanh'], help="activation function")
     binarymaml_args.add_argument("--bm_layer_size", default=512, type=int, help="size of hypernetwork layers")
     binarymaml_args.add_argument("--bm_num_layers", default=2, type=int, help="num of hypernetwork hidden layers")
+    binarymaml_args.add_argument("--bm_detach_second_encoder", action="store_true", help="freeze second encoder")
     binarymaml_args.add_argument("--bm_decrease_epochs", default=200, type=int, help="num of epochs required to decrease temperature to given value")
+    binarymaml_args.add_argument("--bm_first_update", default="mask", choices=["mask", "maml"], type=str, help="first update method for fast weights")
+    binarymaml_args.add_argument("--bm_task_update_num", default=5, type=int, help="number of maml updates")
     binarymaml_args.add_argument("--bm_gumbel_discretize", action="store_true", help="if true gumbel output will be discretized")
+    binarymaml_args.add_argument("--bm_freeze_target_network", action="store_true", help="freeze target network")
+    binarymaml_args.add_argument("--bm_fixed_size_mask", action="store_true", help="uses fixed size binary mask")
     binarymaml_args.add_argument("--bm_mask_size", default=0.3, type=float, help="size of binary mask")
     binarymaml_args.add_argument("--bm_mask_type", default="hard", choices=["soft", "hard"], type=str, help="type of subnet mask")
     binarymaml_args.add_argument("--bm_batch_size", default=4, type=int, help="batch size")
     binarymaml_args.add_argument("--bm_chunk_emb_size", default=8, type=int, help="chunk embedding size for hypernetwork")
     binarymaml_args.add_argument("--bm_chunk_size", default=325, type=int, help="chunk size produced by hypernetwork")
-    binarymaml_args.add_argument("--bm_skip_eval", action='store_true', help="change model to eval in validation loop")
+    binarymaml_args.add_argument("--bm_adjust_eval", action='store_true', help="change model to eval in validation loop")
 
 
     return parser

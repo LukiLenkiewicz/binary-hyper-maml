@@ -54,13 +54,13 @@ class Linear_fw(nn.Linear): #used in MAML to forward input with fast weight
         self.weight.fast = None #Lazy hack to add fast weight link
         self.bias.fast = None
 
-
     def forward(self, x):
         if self.weight.fast is not None and self.bias.fast is not None:
             out = F.linear(x, self.weight.fast, self.bias.fast) #weight.fast (fast weight) is the temporaily adapted weight
         else:
             out = super(Linear_fw, self).forward(x)
         return out
+
 
 class BLinear_fw(Linear_fw): #used in BHMAML to forward input with fast weight
     def __init__(self, in_features, out_features):
@@ -116,6 +116,8 @@ class BatchNorm2d_fw(nn.BatchNorm2d): #used in MAML to forward input with fast w
         else:
             out = F.batch_norm(x, running_mean, running_var, self.weight, self.bias, training = True, momentum = 1)
         return out
+
+
 
 # Simple Conv Block
 class ConvBlock(nn.Module):
@@ -517,8 +519,138 @@ class ResNet10WithKernel(nn.Module):
         out = self.nn_kernel(x)
         return out
 
+class Conv2d_bm(nn.Conv2d):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,padding=0, bias = True):
+        super(Conv2d_bm, self).__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, bias=bias)
+        self.weight.fast = None
+        self.bias.fast = None
 
-def Conv4():
+    def forward(self, x):
+        if self.weight.fast is not None and self.bias.fast is not None:
+            out = F.conv2d(x, self.weight.fast, self.bias.fast, stride=self.stride, padding=self.padding)
+        else:
+            out = super(Conv2d_bm, self).forward(x)
+
+        return out
+
+
+class ConvBlock_fw(nn.Module):
+    def __init__(self, indim, outdim, pool = True, padding = 1):
+        super(ConvBlock_fw, self).__init__()
+        C      = Conv2d_fw(indim, outdim, 3, padding = padding)
+        BN     = nn.BatchNorm2d(outdim)
+        relu   = nn.ReLU(inplace=True)
+
+        self.parametrized_layers = [C, BN, relu]
+        # self.parametrized_layers = [C, relu]
+        if pool:
+            pooling_layer = nn.MaxPool2d(2)
+            self.parametrized_layers.append(pooling_layer)
+
+        for layer in self.parametrized_layers:
+            init_layer(layer)
+
+        self.trunk = nn.Sequential(*self.parametrized_layers)
+
+    def forward(self,x):
+        out = self.trunk(x)
+        return out
+
+    @property
+    def fast_weight(self):
+        return self.trunk[0].weight
+
+    @property
+    def fast_bias(self):
+        return self.trunk[0].bias
+
+
+class HypnetConv(nn.Module):
+    def __init__(self, depth, flatten = True, pool=False):
+        super(HypnetConv,self).__init__()
+        trunk = []
+        self._depth = depth
+        for i in range(depth):
+            size = 64
+            indim = 3 if i == 0 else size
+            outdim = size
+            B = ConvBlock_fw(indim, outdim, pool = ( i <4 ) ) #only pooling for fist 4 layers
+            trunk.append(B)
+
+        if pool:
+            trunk.append(nn.AdaptiveAvgPool2d((1,1)))
+
+        if flatten:
+            trunk.append(Flatten())
+
+        self.trunk = nn.Sequential(*trunk)
+        self.final_feat_dim: int = 64 # outdim if pool else 1600
+
+    def forward(self,x):
+        out = self.trunk(x)
+        return out
+
+    def get_universal_parameters(self):
+        params = []
+        for i in range(self._depth):
+            layer = self.trunk[i].trunk[0]
+            for weight in layer.parameters():
+                params.append(weight.clone())
+        return params
+
+    @property
+    def last_conv_weight(self):
+        return self.trunk[self._depth-1].fast_weight
+
+    @property
+    def last_conv_bias(self):
+        return self.trunk[self._depth-1].fast_bias
+
+class ConvNet2Head(nn.Module):
+    def __init__(self, depth, flatten = True, pool=False):
+        super(ConvNet2Head,self).__init__()
+        trunk = []
+        for i in range(depth-1):
+            indim = 3 if i == 0 else 64
+            outdim = 64
+            B = ConvBlock(indim, outdim, pool = ( i <4 ) ) #only pooling for fist 4 layers
+            trunk.append(B)
+
+        self.support_block = ConvBlock(64, 64)
+        self.query_block = ConvBlock_fw(64, 64)
+
+        if pool:
+            trunk.append(nn.AdaptiveAvgPool2d((1,1)))
+
+        if flatten:
+            self.flatten = Flatten()
+
+        self.trunk = nn.Sequential(*trunk)
+        self.final_feat_dim: int = 64 # outdim if pool else 1600
+
+    def forward(self, x, support=True):
+        out = self.trunk(x)
+        if support:
+            out = self.support_block(out)
+        else:
+            out = self.query_block(out)
+
+        out = self.flatten(out)
+        return out
+    
+    @property
+    def last_conv_weight(self):
+        return self.query_block.fast_weight
+
+    @property
+    def last_conv_bias(self):
+        return self.query_block.fast_bias
+
+
+def Conv4(two_head=False):
+    if two_head:
+        return ConvNet2Head(4)
+    return HypnetConv(4)
     return ConvNet(4)
 
 def Conv4Pool():
@@ -577,3 +709,19 @@ def Conv4WithKernel():
 
 def ResNetWithKernel():
     return ResNet10WithKernel()
+
+
+if __name__ == "__main__":
+    import numpy as np
+    feature_query = Conv4()
+
+    classifier_shapes =[[5, 64], [5]]
+    # backbone_shapes = [list(param.shape) for i, param in enumerate(feature_query.parameters(), 1) 
+                # if i%4==1 or i%4==2]
+
+    backbone_shapes = [list(layer.shape) for layer in feature_query.parameters()]
+    # classifier_shapes = [list(layer.shape) for layer in self.classifier.parameters()]
+    shapes =  backbone_shapes + classifier_shapes
+    print(shapes)
+    units = sum(np.prod(shape) for shape in shapes)
+    print(units)

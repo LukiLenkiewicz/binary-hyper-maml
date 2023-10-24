@@ -6,14 +6,14 @@ import json
 import random
 import re
 
-#cwd = os.getcwd() 
-#data_path = join(cwd,'ILSVRC2015/Data/CLS-LOC/train')
-data_path = '/shared/sets/datasets/vision/ImageNet/train'
+cwd = os.getcwd() 
+data_path = join(cwd,'ILSVRC/Data/CLS-LOC/train')
+# data_path = '/shared/sets/datasets/vision/ImageNet/train'
 savedir = './'
 dataset_list = ['base', 'val', 'novel']
 
-#if not os.path.exists(savedir):
-#    os.makedirs(savedir)
+if not os.path.exists(savedir):
+   os.makedirs(savedir)
 
 cl = -1
 folderlist = []
