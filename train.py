@@ -34,6 +34,8 @@ from pathlib import Path
 from save_features import do_save_fts
 from test import perform_test
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def _set_seed(seed, verbose=True):
     if (seed != 0):
@@ -121,7 +123,8 @@ def train(base_loader, val_loader, model, optimization, start_epoch, stop_epoch,
         metrics = model.train_loop(epoch, base_loader, optimizer)
 
         scheduler.step()
-        # model.eval()
+        if not params.bm_skip_eval:
+            model.eval()
 
         delta_params = metrics.pop('delta_params', None)
         if delta_params is not None:
@@ -399,6 +402,7 @@ if __name__ == '__main__':
         raise ValueError('Unknown method')
 
     model = model.cuda()
+    print(f"Number of model params: {count_parameters(model)}")
 
     params.checkpoint_dir = '%s/checkpoints/%s/%s_%s' % (configs.save_dir, params.dataset, params.model, params.method)
 
