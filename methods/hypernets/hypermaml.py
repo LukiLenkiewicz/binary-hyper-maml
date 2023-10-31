@@ -127,8 +127,6 @@ class HyperMAML(MAML):
         if self.bm_activation == "gumbel_softmax":
             shapes = [dim+[2] for dim in shapes]
 
-        input_size = 70*5
-
         if self.bm_freeze_target_network:
             for param in self.feature_query.parameters():
                 param.requires_grad = False
@@ -136,7 +134,7 @@ class HyperMAML(MAML):
             for param in self.classifier.parameters():
                 param.requires_grad = False
 
-        self.hypernet = ChunkedHMLP(shapes, uncond_in_size=input_size, cond_in_size=0, chunk_emb_size=self.bm_chunk_emb_size,
+        self.hypernet = ChunkedHMLP(shapes, uncond_in_size=self.embedding_size, cond_in_size=0, chunk_emb_size=self.bm_chunk_emb_size,
                 layers=hypernet_layers, chunk_size=self.bm_chunk_size, num_cond_embs=1)
         
     def _init_classifier(self):
