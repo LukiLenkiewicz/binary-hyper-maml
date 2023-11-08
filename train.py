@@ -4,6 +4,7 @@ from collections import defaultdict
 from typing import Type, List, Union, Dict, Optional
 from copy import deepcopy
 
+import lightning.pytorch as pl
 import numpy as np
 import torch
 import random
@@ -34,6 +35,7 @@ from pathlib import Path
 
 from save_features import do_save_fts
 from test import perform_test
+from train_callbacks import FSLModule, TrainCallback
 
 
 def _set_seed(seed, verbose=True):
@@ -107,6 +109,10 @@ def train(base_loader, val_loader, model, optimization, start_epoch, stop_epoch,
     print("\n\t".join(params.get_ignored_args()))
 
     delta_params_list = []
+
+    fsl_module = FSLModule(model, optimizer, scheduler, max_acc, max_acc_adaptation_dict, metrics_per_epoch)
+    trainer = pl.Trainer(max_epochs=stop_epoch, accelerator="auto", callbacks=[TrainCallback()])
+    trainer.fit(fsl_module, base_loader, val_loader)
 
     for epoch in range(start_epoch, stop_epoch):
         if epoch >= params.es_epoch:
