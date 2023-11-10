@@ -110,120 +110,120 @@ def train(base_loader, val_loader, model, optimization, start_epoch, stop_epoch,
 
     delta_params_list = []
 
-    fsl_module = FSLModule(model, optimizer, scheduler, max_acc, max_acc_adaptation_dict, metrics_per_epoch)
-    trainer = pl.Trainer(max_epochs=stop_epoch, accelerator="auto", callbacks=[TrainCallback()])
+    fsl_module = FSLModule(model, optimizer, scheduler, max_acc, max_train_acc, max_acc_adaptation_dict, metrics_per_epoch)
+    trainer = pl.Trainer(max_epochs=stop_epoch, accelerator="auto", check_val_every_n_epoch=1, callbacks=[TrainCallback()])
     trainer.fit(fsl_module, base_loader, val_loader)
 
-    for epoch in range(start_epoch, stop_epoch):
-        if epoch >= params.es_epoch:
-            if max_acc < params.es_threshold:
-                print("Breaking training at epoch", epoch, "because max accuracy", max_acc, "is lower than threshold",
-                      params.es_threshold)
-                break
+    # for epoch in range(start_epoch, stop_epoch):
+    #     if epoch >= params.es_epoch:
+    #         if max_acc < params.es_threshold:
+    #             print("Breaking training at epoch", epoch, "because max accuracy", max_acc, "is lower than threshold",
+    #                   params.es_threshold)
+    #             break
 
-        model.epoch = epoch
-        model.start_epoch = start_epoch
-        model.stop_epoch = stop_epoch
+    #     model.epoch = epoch
+    #     model.start_epoch = start_epoch
+    #     model.stop_epoch = stop_epoch
 
-        model.train()
-        if params.method in ['hyper_maml','bayes_hmaml']:
-            metrics = model.train_loop(epoch, base_loader, optimizer)
-        else:
-            metrics = model.train_loop(epoch, base_loader, optimizer)  # model are called by reference, no need to return
+    #     model.train()
+    #     if params.method in ['hyper_maml','bayes_hmaml']:
+    #         metrics = model.train_loop(epoch, base_loader, optimizer)
+    #     else:
+    #         metrics = model.train_loop(epoch, base_loader, optimizer)  # model are called by reference, no need to return
 
-        scheduler.step()
-        # model.eval()
+    #     scheduler.step()
+    #     # model.eval()
 
-        delta_params = metrics.pop('delta_params', None)
-        if delta_params is not None:
-            delta_params_list.append(delta_params)
+    #     delta_params = metrics.pop('delta_params', None)
+    #     if delta_params is not None:
+    #         delta_params_list.append(delta_params)
 
-        if (epoch % params.eval_freq == 0) or epoch in [
-            params.es_epoch - 1,
-            stop_epoch - 1
-        ]:
-            try:
-                acc, test_loop_metrics = model.test_loop(val_loader)
-            except:
-                acc = model.test_loop(val_loader)
-                test_loop_metrics = dict()
-            print(
-                f"Epoch {epoch}/{stop_epoch}  | Max test acc {max_acc:.2f} | Test acc {acc:.2f} | Metrics: {test_loop_metrics}")
+    #     if (epoch % params.eval_freq == 0) or epoch in [
+    #         params.es_epoch - 1,
+    #         stop_epoch - 1
+    #     ]:
+    #         try:
+    #             acc, test_loop_metrics = model.test_loop(val_loader)
+    #         except:
+    #             acc = model.test_loop(val_loader)
+    #             test_loop_metrics = dict()
+    #         print(
+    #             f"Epoch {epoch}/{stop_epoch}  | Max test acc {max_acc:.2f} | Test acc {acc:.2f} | Metrics: {test_loop_metrics}")
 
-            metrics = metrics or dict()
-            metrics["lr"] = scheduler.get_lr()[0]
-            metrics["accuracy/val"] = acc
-            metrics["accuracy/val_max"] = max_acc
-            metrics["accuracy/train_max"] = max_train_acc
-            metrics = {
-                **metrics,
-                **test_loop_metrics,
-                **max_acc_adaptation_dict
-            }
+    #         metrics = metrics or dict()
+    #         metrics["lr"] = scheduler.get_lr()[0]
+    #         metrics["accuracy/val"] = acc
+    #         metrics["accuracy/val_max"] = max_acc
+    #         metrics["accuracy/train_max"] = max_train_acc
+    #         metrics = {
+    #             **metrics,
+    #             **test_loop_metrics,
+    #             **max_acc_adaptation_dict
+    #         }
 
-            if params.hm_set_forward_with_adaptation:
-                for i in range(params.hn_val_epochs + 1):
-                    if i != 0:
-                        metrics[f"accuracy/val_support_max@-{i}"] = max_acc_adaptation_dict[
-                            f"accuracy/val_support_max@-{i}"]
-                    metrics[f"accuracy/val_max@-{i}"] = max_acc_adaptation_dict[f"accuracy/val_max@-{i}"]
+    #         if params.hm_set_forward_with_adaptation:
+    #             for i in range(params.hn_val_epochs + 1):
+    #                 if i != 0:
+    #                     metrics[f"accuracy/val_support_max@-{i}"] = max_acc_adaptation_dict[
+    #                         f"accuracy/val_support_max@-{i}"]
+    #                 metrics[f"accuracy/val_max@-{i}"] = max_acc_adaptation_dict[f"accuracy/val_max@-{i}"]
 
-            if metrics["accuracy/train"] > max_train_acc:
-                max_train_acc = metrics["accuracy/train"]
+    #         if metrics["accuracy/train"] > max_train_acc:
+    #             max_train_acc = metrics["accuracy/train"]
 
-            if params.hm_set_forward_with_adaptation:
-                for i in range(params.hn_val_epochs + 1):
-                    if i != 0 and metrics[f"accuracy/val_support_acc@-{i}"] > max_acc_adaptation_dict[
-                        f"accuracy/val_support_max@-{i}"]:
-                        max_acc_adaptation_dict[f"accuracy/val_support_max@-{i}"] = metrics[
-                            f"accuracy/val_support_acc@-{i}"]
+    #         if params.hm_set_forward_with_adaptation:
+    #             for i in range(params.hn_val_epochs + 1):
+    #                 if i != 0 and metrics[f"accuracy/val_support_acc@-{i}"] > max_acc_adaptation_dict[
+    #                     f"accuracy/val_support_max@-{i}"]:
+    #                     max_acc_adaptation_dict[f"accuracy/val_support_max@-{i}"] = metrics[
+    #                         f"accuracy/val_support_acc@-{i}"]
 
-                    if metrics[f"accuracy/val@-{i}"] > max_acc_adaptation_dict[f"accuracy/val_max@-{i}"]:
-                        max_acc_adaptation_dict[f"accuracy/val_max@-{i}"] = metrics[f"accuracy/val@-{i}"]
+    #                 if metrics[f"accuracy/val@-{i}"] > max_acc_adaptation_dict[f"accuracy/val_max@-{i}"]:
+    #                     max_acc_adaptation_dict[f"accuracy/val_max@-{i}"] = metrics[f"accuracy/val@-{i}"]
 
-            if acc > max_acc:  # for baseline and baseline++, we don't use validation here so we let acc = -1
-                print("--> Best model! save...")
-                max_acc = acc
-                outfile = os.path.join(params.checkpoint_dir, 'best_model.tar')
-                torch.save({'epoch': epoch, 'state': model.state_dict()}, outfile)
+    #         if acc > max_acc:  # for baseline and baseline++, we don't use validation here so we let acc = -1
+    #             print("--> Best model! save...")
+    #             max_acc = acc
+    #             outfile = os.path.join(params.checkpoint_dir, 'best_model.tar')
+    #             torch.save({'epoch': epoch, 'state': model.state_dict()}, outfile)
 
-                if params.maml_save_feature_network and params.method in ['maml', 'hyper_maml','bayes_hmaml']:
-                    outfile = os.path.join(params.checkpoint_dir, 'best_feature_net.tar')
-                    torch.save({'epoch': epoch, 'state': model.feature.state_dict()}, outfile)
+    #             if params.maml_save_feature_network and params.method in ['maml', 'hyper_maml','bayes_hmaml']:
+    #                 outfile = os.path.join(params.checkpoint_dir, 'best_feature_net.tar')
+    #                 torch.save({'epoch': epoch, 'state': model.feature.state_dict()}, outfile)
 
-            outfile = os.path.join(params.checkpoint_dir, 'last_model.tar')
-            torch.save({'epoch': epoch, 'state': model.state_dict()}, outfile)
+    #         outfile = os.path.join(params.checkpoint_dir, 'last_model.tar')
+    #         torch.save({'epoch': epoch, 'state': model.state_dict()}, outfile)
 
-            if params.maml_save_feature_network and params.method in ['maml', 'hyper_maml','bayes_hmaml']:
-                outfile = os.path.join(params.checkpoint_dir, 'last_feature_net.tar')
-                torch.save({'epoch': epoch, 'state': model.feature.state_dict()}, outfile)
+    #         if params.maml_save_feature_network and params.method in ['maml', 'hyper_maml','bayes_hmaml']:
+    #             outfile = os.path.join(params.checkpoint_dir, 'last_feature_net.tar')
+    #             torch.save({'epoch': epoch, 'state': model.feature.state_dict()}, outfile)
 
-            if (epoch % params.save_freq == 0) or (epoch == stop_epoch - 1):
-                outfile = os.path.join(params.checkpoint_dir, '{:d}.tar'.format(epoch))
-                torch.save({'epoch': epoch, 'state': model.state_dict()}, outfile)
+    #         if (epoch % params.save_freq == 0) or (epoch == stop_epoch - 1):
+    #             outfile = os.path.join(params.checkpoint_dir, '{:d}.tar'.format(epoch))
+    #             torch.save({'epoch': epoch, 'state': model.state_dict()}, outfile)
 
-            if metrics is not None:
-                for k, v in metrics.items():
-                    metrics_per_epoch[k].append(v)
+    #         if metrics is not None:
+    #             for k, v in metrics.items():
+    #                 metrics_per_epoch[k].append(v)
 
-            with (Path(params.checkpoint_dir) / "metrics.json").open("w") as f:
-                json.dump(metrics_per_epoch, f, indent=2)
+    #         with (Path(params.checkpoint_dir) / "metrics.json").open("w") as f:
+    #             json.dump(metrics_per_epoch, f, indent=2)
 
-            if neptune_run is not None:
-                for m, v in metrics.items():
-                    neptune_run[m].append(v, step=epoch)
+    #         if neptune_run is not None:
+    #             for m, v in metrics.items():
+    #                 neptune_run[m].append(v, step=epoch)
 
-    if neptune_run is not None:
-        neptune_run["best_model"].track_files(os.path.join(params.checkpoint_dir, 'best_model.tar'))
-        neptune_run["last_model"].track_files(os.path.join(params.checkpoint_dir, 'last_model.tar'))
+    # if neptune_run is not None:
+    #     neptune_run["best_model"].track_files(os.path.join(params.checkpoint_dir, 'best_model.tar'))
+    #     neptune_run["last_model"].track_files(os.path.join(params.checkpoint_dir, 'last_model.tar'))
 
-        if params.maml_save_feature_network:
-            neptune_run["best_feature_net"].track_files(os.path.join(params.checkpoint_dir, 'best_feature_net.tar'))
-            neptune_run["last_feature_net"].track_files(os.path.join(params.checkpoint_dir, 'last_feature_net.tar'))
+    #     if params.maml_save_feature_network:
+    #         neptune_run["best_feature_net"].track_files(os.path.join(params.checkpoint_dir, 'best_feature_net.tar'))
+    #         neptune_run["last_feature_net"].track_files(os.path.join(params.checkpoint_dir, 'last_feature_net.tar'))
 
-    if len(delta_params_list) > 0 and params.hm_save_delta_params:
-        with (Path(params.checkpoint_dir) / f"delta_params_list_{len(delta_params_list)}.json").open("w") as f:
-            json.dump(delta_params_list, f, indent=2)
+    # if len(delta_params_list) > 0 and params.hm_save_delta_params:
+    #     with (Path(params.checkpoint_dir) / f"delta_params_list_{len(delta_params_list)}.json").open("w") as f:
+    #         json.dump(delta_params_list, f, indent=2)
 
     return model
 

@@ -1,5 +1,6 @@
 from collections import defaultdict
 import time
+from typing import Any, Optional
 
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import Callback
@@ -9,19 +10,21 @@ import torch
 PRINT_FREEQ = 10
 
 class FSLModule(pl.LightningModule):
-    def __init__(self, model, optimizer, scheduler, max_accuracy, max_acc_adaptation_dict, metrics_per_epoch):
+    def __init__(self, model, scheduler, max_accuracy, max_train_acc, max_acc_adaptation_dict, metrics_per_epoch):
         super().__init__()
         self.save_hyperparameters()
         self.model = model
-        self.optimizer = optimizer
         self.scheduler = scheduler
         self.max_accuracy = max_accuracy
+        self.max_train_acc = max_train_acc
         self.max_acc_adaptation_dict = max_acc_adaptation_dict
         self.metrics_per_epoch = metrics_per_epoch
 
         self.metrics = None
         self.avg_loss = 0
         self.delta_params_list = []
+
+        self.automatic_optimization = False
 
         self.acc_all = []
         self.loss_all = []
@@ -31,8 +34,18 @@ class FSLModule(pl.LightningModule):
         scores = self.model.classifier.forward(out)
         return scores
 
+    def on_train_epoch_start(self) -> None:
+        self.avg_loss = 0
+        optimizer= self.optimizers()
+        optimizer.zero_grad()
+
+    def on_train_batch_start(self, batch: Any, batch_idx: int):
+        pass
+
     def training_step(self, batch, batch_idx):
+        self.model.train()
         x, _ = batch
+        optimizer= self.optimizers()
 
         self.n_query = x.size(1) - self.model.n_support
         assert self.n_way == x.size(0), "MAML do not support way change"
@@ -48,12 +61,13 @@ class FSLModule(pl.LightningModule):
             loss_q = torch.stack(loss_all).sum(0)
             loss_q.backward()
 
-            self.optimizer.step()
+            optimizer.step()
 
             task_count = 0
             loss_all = []
 
     def validation_step(self, batch, batch_idx):
+        self.model.train()
         x, _ = batch
 
         self.n_query = x.size(1) - self.n_support
@@ -64,19 +78,11 @@ class FSLModule(pl.LightningModule):
         self.acc_all.append(correct_this / count_this * 100)
         eval_time += (t - s)
 
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.model.parameters(), lr=self.lr)
+
 
 class TrainCallback(Callback):
-    def on_fit_start(self, trainer, pl_module):
-        # beginningo of train func
-        pass
-
-    def on_fit_end(self, trainer, pl_module):
-        pass
-
-    def on_train_epoch_start(self, trainer, pl_module):
-        pl_module.avg_loss = 0
-        pl_module.optimizer.zero_grad()
-
     def on_train_batch_end(self, trainer, pl_module, batch, batch_idx):
         i = batch_idx
         acc_all = np.asarray(acc_all)
@@ -112,6 +118,7 @@ class TrainCallback(Callback):
         print('%d Test Acc = %4.2f%% +- %4.2f%%' % (iter_num, acc_mean, 1.96 * acc_std / np.sqrt(iter_num)))
         print("Num tasks", num_tasks)
 
-        ret = [acc_mean]
-        ret.append(metrics)
-        pl_module.ret = ret
+        acc = [acc_mean]
+        acc.append(metrics)
+        
+        # print(f"Epoch {pl_module.model.epoch}/{pl_module.model.epoch}  | Max test acc {max_acc:.2f} | Test acc {acc:.2f} | Metrics: {test_loop_metrics}")
