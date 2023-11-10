@@ -35,7 +35,7 @@ from pathlib import Path
 
 from save_features import do_save_fts
 from test import perform_test
-from train_callbacks import FSLModule, TrainCallback
+from train_callbacks import FSLModule
 
 
 def _set_seed(seed, verbose=True):
@@ -55,52 +55,52 @@ def _set_seed(seed, verbose=True):
 def train(base_loader, val_loader, model, optimization, start_epoch, stop_epoch, params, *,
           neptune_run: Optional[Run] = None):
     print("Tot epochs: " + str(stop_epoch))
-    if optimization == 'adam':
-        optimizer = torch.optim.Adam(model.parameters(), lr=params.lr)
-    elif optimization == "sgd":
-        optimizer = torch.optim.SGD(model.parameters(), lr=params.lr)
-    else:
-        raise ValueError(f'Unknown optimization {optimization}, please define by yourself')
+    # if optimization == 'adam':
+    #     optimizer = torch.optim.Adam(model.parameters(), lr=params.lr)
+    # elif optimization == "sgd":
+    #     optimizer = torch.optim.SGD(model.parameters(), lr=params.lr)
+    # else:
+    #     raise ValueError(f'Unknown optimization {optimization}, please define by yourself')
 
-    max_acc = 0
-    max_train_acc = 0
-    max_acc_adaptation_dict = {}
+    # max_acc = 0
+    # max_train_acc = 0
+    # max_acc_adaptation_dict = {}
 
-    if params.hm_set_forward_with_adaptation:
-        max_acc_adaptation_dict = {}
-        for i in range(params.hn_val_epochs + 1):
-            if i != 0:
-                max_acc_adaptation_dict[f"accuracy/val_support_max@-{i}"] = 0
-            max_acc_adaptation_dict[f"accuracy/val_max@-{i}"] = 0
+    # if params.hm_set_forward_with_adaptation:
+    #     max_acc_adaptation_dict = {}
+    #     for i in range(params.hn_val_epochs + 1):
+    #         if i != 0:
+    #             max_acc_adaptation_dict[f"accuracy/val_support_max@-{i}"] = 0
+    #         max_acc_adaptation_dict[f"accuracy/val_max@-{i}"] = 0
 
-    if not os.path.isdir(params.checkpoint_dir):
-        os.makedirs(params.checkpoint_dir)
+    # if not os.path.isdir(params.checkpoint_dir):
+    #     os.makedirs(params.checkpoint_dir)
 
-    if (Path(params.checkpoint_dir) / "metrics.json").exists() and params.resume:
-        with (Path(params.checkpoint_dir) / "metrics.json").open("r") as f:
-            try:
-                metrics_per_epoch = defaultdict(list, json.load(f))
-                try:
-                    max_acc = metrics_per_epoch["accuracy/val_max"][-1]
-                    max_train_acc = metrics_per_epoch["accuracy/train_max"][-1]
+    # if (Path(params.checkpoint_dir) / "metrics.json").exists() and params.resume:
+    #     with (Path(params.checkpoint_dir) / "metrics.json").open("r") as f:
+    #         try:
+    #             metrics_per_epoch = defaultdict(list, json.load(f))
+    #             try:
+    #                 max_acc = metrics_per_epoch["accuracy/val_max"][-1]
+    #                 max_train_acc = metrics_per_epoch["accuracy/train_max"][-1]
 
-                    if params.hm_set_forward_with_adaptation:
-                        for i in range(params.hn_val_epochs + 1):
-                            if i != 0:
-                                max_acc_adaptation_dict[f"accuracy/val_support_max@-{i}"] = \
-                                metrics_per_epoch[f"accuracy/val_support_max@-{i}"][-1]
-                            max_acc_adaptation_dict[f"accuracy/val_max@-{i}"] = \
-                            metrics_per_epoch[f"accuracy/val_max@-{i}"][-1]
-                except:
-                    max_acc = metrics_per_epoch["accuracy_val_max"][-1]
-                    max_train_acc = metrics_per_epoch["accuracy_train_max"][-1]
-            except:
-                metrics_per_epoch = defaultdict(list)
+    #                 if params.hm_set_forward_with_adaptation:
+    #                     for i in range(params.hn_val_epochs + 1):
+    #                         if i != 0:
+    #                             max_acc_adaptation_dict[f"accuracy/val_support_max@-{i}"] = \
+    #                             metrics_per_epoch[f"accuracy/val_support_max@-{i}"][-1]
+    #                         max_acc_adaptation_dict[f"accuracy/val_max@-{i}"] = \
+    #                         metrics_per_epoch[f"accuracy/val_max@-{i}"][-1]
+    #             except:
+    #                 max_acc = metrics_per_epoch["accuracy_val_max"][-1]
+    #                 max_train_acc = metrics_per_epoch["accuracy_train_max"][-1]
+    #         except:
+    #             metrics_per_epoch = defaultdict(list)
 
-    else:
-        metrics_per_epoch = defaultdict(list)
+    # else:
+    #     metrics_per_epoch = defaultdict(list)
 
-    scheduler = get_scheduler(params, optimizer, stop_epoch)
+    # scheduler = get_scheduler(params, optimizer, stop_epoch)
 
     print("Starting training")
     print("Params accessed until this point:")
@@ -108,10 +108,8 @@ def train(base_loader, val_loader, model, optimization, start_epoch, stop_epoch,
     print("Params ignored until this point:")
     print("\n\t".join(params.get_ignored_args()))
 
-    delta_params_list = []
-
-    fsl_module = FSLModule(model, optimizer, scheduler, max_acc, max_train_acc, max_acc_adaptation_dict, metrics_per_epoch)
-    trainer = pl.Trainer(max_epochs=stop_epoch, accelerator="auto", check_val_every_n_epoch=1, callbacks=[TrainCallback()])
+    fsl_module = FSLModule(model, params=params, neptune_run=neptune_run)
+    trainer = pl.Trainer(max_epochs=stop_epoch, accelerator="auto", check_val_every_n_epoch=params.eval_freq)
     trainer.fit(fsl_module, base_loader, val_loader)
 
     # for epoch in range(start_epoch, stop_epoch):
