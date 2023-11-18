@@ -14,7 +14,7 @@ import os
 
 import configs
 import backbone
-from data.datamgr import SimpleDataManager, SetDataManager
+from data.datamgr import SimpleDataManager, SetDataManager, EmbDataManager
 from methods.baselinetrain import BaselineTrain
 from methods.DKT import DKT
 from methods.hypernets.hypernet_poc import HyperNetPOC
@@ -26,6 +26,7 @@ from methods.maml import MAML
 from methods.hypernets.bayeshmaml import BayesHMAML
 from methods.hypernets.hypermaml import HyperMAML
 from methods.hypernets.binarymaml import BinaryHyperMAML
+from methods.hypernets.vbhmaml import VBHMAML
 from io_utils import model_dict, parse_args, get_resume_file, setup_neptune
 
 import matplotlib.pyplot as plt
@@ -379,7 +380,6 @@ if __name__ == '__main__':
         elif params.method in hypernet_types.keys():
             hn_type: Type[HyperNetPOC] = hypernet_types[params.method]
             model = hn_type(model_dict[params.model], params=params, **train_few_shot_params)
-        # elif params.method == "hyper_maml" or params.method == 'bayes_hmaml':
         elif params.method in ["hyper_maml", 'bayes_hmaml', 'binary_maml']:
             backbone.ConvBlock.maml = True
             backbone.SimpleBlock.maml = True
@@ -398,6 +398,20 @@ if __name__ == '__main__':
                 model.n_task = 32
                 model.task_update_num = 1
                 model.train_lr = 0.1
+    elif params.method == "vbh_maml":
+        n_query = max(1, int(
+            16 * params.test_n_way / params.train_n_way))  # if test_n_way is smaller than train_n_way, reduce n_query to keep batch size small
+        print("n_query", n_query)
+        train_few_shot_params = dict(n_way=params.train_n_way, n_support=params.n_shot, n_query=n_query)
+        base_datamgr = EmbDataManager(image_size, **train_few_shot_params)  # n_eposide=100
+        base_loader = base_datamgr.get_data_loader(base_file, aug=params.train_aug)
+
+        test_few_shot_params = dict(n_way=params.test_n_way, n_support=params.n_shot, n_query=n_query)
+
+        val_datamgr = EmbDataManager(image_size, **test_few_shot_params)
+        val_loader = val_datamgr.get_data_loader(val_file, aug=False)
+        model = VBHMAML(model_dict[params.model], params=params, approx=(params.method == 'maml_approx'),
+                               **train_few_shot_params)
     else:
         raise ValueError('Unknown method')
 
@@ -417,7 +431,7 @@ if __name__ == '__main__':
     print(params.checkpoint_dir)
     start_epoch = params.start_epoch
     stop_epoch = params.stop_epoch
-    if params.method in ['maml', 'maml_approx', 'hyper_maml','bayes_hmaml', 'binary_maml']:
+    if params.method in ['maml', 'maml_approx', 'hyper_maml','bayes_hmaml', 'binary_maml', 'vbh_maml']:
         stop_epoch = params.stop_epoch * model.n_task  # maml use multiple tasks in one update
 
     if params.resume:
