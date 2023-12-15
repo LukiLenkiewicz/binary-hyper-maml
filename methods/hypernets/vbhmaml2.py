@@ -11,18 +11,15 @@ from torch.nn import functional as F
 import backbone
 from backbone import Linear_fw
 from methods.hypernets.utils import accuracy_from_scores
-from methods.vbh_meta_template import VBHMetaTemplate
+from methods.maml import MAML
 from methods.hypernets.binary_maml_utils import Binarizer
 
 from hypnettorch.hnets.chunked_mlp_hnet import ChunkedHMLP, HMLP
 
-EMBEDDING_SIZE = 768
 
-class VBHMAML(VBHMetaTemplate):
-    def __init__(self, n_way, n_support, n_query, params=None, approx=False):
-        super().__init__(n_way, n_support, change_way = False)
-        self.loss_fn = nn.CrossEntropyLoss()
-
+class VBHMAML(MAML):
+    def __init__(self, model_func, n_way, n_support, n_query, params=None, approx=False):
+        super().__init__(model_func, n_way, n_support, n_query, params=params)
         self.hn_tn_hidden_size = params.hn_tn_hidden_size
         self.hn_tn_depth = params.hn_tn_depth
 
@@ -35,11 +32,20 @@ class VBHMAML(VBHMetaTemplate):
 
         self.hn_sup_aggregation = params.hn_sup_aggregation
         self.hn_hidden_size = params.hn_hidden_size
+        self.hm_lambda = params.hm_lambda
         self.hm_save_delta_params = params.hm_save_delta_params
+        self.hm_use_class_batch_input = params.hm_use_class_batch_input
+        self.hn_adaptation_strategy = params.hn_adaptation_strategy
         self.hm_support_set_loss = params.hm_support_set_loss
+        self.hm_maml_warmup = params.hm_maml_warmup
+        self.hm_maml_warmup_epochs = params.hm_maml_warmup_epochs
+        self.hm_maml_warmup_switch_epochs = params.hm_maml_warmup_switch_epochs
+        self.hm_maml_update_feature_net = params.hm_maml_update_feature_net
         self.hm_update_operator = params.hm_update_operator
         self.hm_load_feature_net = params.hm_load_feature_net
         self.hm_feature_net_path = params.hm_feature_net_path
+        self.hm_detach_feature_net = params.hm_detach_feature_net
+        self.hm_detach_before_hyper_net = params.hm_detach_before_hyper_net
         self.hm_set_forward_with_adaptation = params.hm_set_forward_with_adaptation
         self.hn_val_lr = params.hn_val_lr
         self.hn_val_epochs = params.hn_val_epochs
@@ -48,6 +54,8 @@ class VBHMAML(VBHMetaTemplate):
         self.alpha = 0
         self.hn_alpha_step = params.hn_alpha_step
 
+        if self.hn_adaptation_strategy == 'increasing_alpha' and self.hn_alpha_step < 0:
+            raise ValueError('hn_alpha_step is not positive!')
 
         self.single_test = False
         self.epoch = -1
@@ -57,12 +65,18 @@ class VBHMAML(VBHMetaTemplate):
         self.bm_activation = params.bm_activation
         self.bm_layer_size = params.bm_layer_size
         self.bm_num_layers = params.bm_num_layers
+        self.bm_decrease_epochs = params.bm_decrease_epochs
+        self.bm_gumbel_discretize = params.bm_gumbel_discretize
         self.bm_mask_size = params.bm_mask_size
+        self.bm_chunk_emb_size = params.bm_chunk_emb_size
+        self.bm_chunk_size = params.bm_chunk_size
 
 
         self.calculate_embedding_size()
 
-        self.classifier = Classifier_FW(EMBEDDING_SIZE, num_layers=self.hn_tn_depth, layer_size=self.hn_tn_hidden_size, num_classes=self.n_way)
+        self.classifier = Classifier_FW(768, num_layers=self.hn_tn_depth, layer_size=self.hn_tn_hidden_size, num_classes=self.n_way)
+        print(self.classifier)
+        # self.classifier = backbone.Linear_fw(768, self.n_way)
         self.hypernet = self._init_hypernet()
 
     def _init_classifier(self):
@@ -85,9 +99,9 @@ class VBHMAML(VBHMetaTemplate):
         shapes = [list(layer.shape) for layer in self.classifier.parameters()]
         hypernet_layers = [self.bm_layer_size for _ in range(self.bm_num_layers)]
 
-        hypernet = HMLP(shapes, uncond_in_size=3870, cond_in_size=0, layers=hypernet_layers, num_cond_embs=1)
-        # hypernet = ChunkedHMLP(shapes, uncond_in_size=3870, cond_in_size=0, chunk_emb_size=8,
-                # layers=hypernet_layers, chunk_size=325, num_cond_embs=1)
+        hypernet = ChunkedHMLP(shapes, uncond_in_size=3870, cond_in_size=0, chunk_emb_size=self.bm_chunk_emb_size,
+                layers=hypernet_layers, chunk_size=self.bm_chunk_size, num_cond_embs=1)
+
 
         return hypernet
 
@@ -117,13 +131,13 @@ class VBHMAML(VBHMetaTemplate):
         support_embeddings_resh = support_embeddings.reshape(1, -1)
         delta_params = self.hypernet(support_embeddings_resh)
 
-        params_flat = [param.clone().detach().reshape(-1) for param in delta_params]
-        concat = torch.cat(params_flat)
+        # params_flat = [param.clone().detach().reshape(-1) for param in delta_params]
+        # concat = torch.cat(params_flat)
 
-        k_val = torch.quantile(concat, self.bm_mask_size).item()
+        # k_val = torch.quantile(concat, self.bm_mask_size).item()
 
-        for i in range(len(delta_params)):
-            delta_params[i] = Binarizer.apply(delta_params[i], k_val)
+        # for i in range(len(delta_params)):
+        #     delta_params[i] = Binarizer.apply(delta_params[i], k_val)
 
         return delta_params
 
@@ -144,15 +158,23 @@ class VBHMAML(VBHMetaTemplate):
             else:
                 weight.fast = weight.fast * update_value
 
+    def _get_p_value(self):
+        if self.epoch < self.hm_maml_warmup_epochs:
+            return 1.0
+        elif self.hm_maml_warmup_epochs <= self.epoch < self.hm_maml_warmup_epochs + self.hm_maml_warmup_switch_epochs:
+            return (self.hm_maml_warmup_switch_epochs + self.hm_maml_warmup_epochs - self.epoch) / (
+                        self.hm_maml_warmup_switch_epochs + 1)
+        return 0.0
+
     def _update_network_weights(self, delta_params_list, support_embeddings, support_data_labels, train_stage=False):
         fast_parameters = list(self.classifier.parameters())
         for weight in self.classifier.parameters():
             weight.fast = None
         self.classifier.zero_grad()
 
-        for k, weight in enumerate(self.classifier.parameters()):
-            update_value = delta_params_list[k]
-            self._update_weight(weight, update_value)
+        # for k, weight in enumerate(self.classifier.parameters()):
+        #     update_value = delta_params_list[k]
+        #     self._update_weight(weight, update_value)
 
         for task_step in range(self.task_update_num):
             scores = self.classifier(support_embeddings)
@@ -170,27 +192,31 @@ class VBHMAML(VBHMetaTemplate):
                 update_value = (self.train_lr * grad[k])
                 self._update_weight(weight, update_value)
 
-    def _get_list_of_delta_params(self, support_embeddings, support_data_labels):
-        if self.enhance_embeddings:
-            with torch.no_grad():
-                logits = self.classifier.forward(support_embeddings).detach()
-                logits = F.softmax(logits, dim=1)
+    def _get_list_of_delta_params(self, maml_warmup_used, support_embeddings, support_data_labels):
+        if not maml_warmup_used:
 
-            labels = support_data_labels.view(support_embeddings.shape[0], -1)
-            support_embeddings = torch.cat((support_embeddings, logits, labels), dim=1)
+            if self.enhance_embeddings:
+                with torch.no_grad():
+                    logits = self.classifier.forward(support_embeddings).detach()
+                    logits = F.softmax(logits, dim=1)
 
-        for weight in self.parameters():
-            weight.fast = None
-        self.zero_grad()
+                labels = support_data_labels.view(support_embeddings.shape[0], -1)
+                support_embeddings = torch.cat((support_embeddings, logits, labels), dim=1)
 
-        support_embeddings = self.apply_embeddings_strategy(support_embeddings)
+            for weight in self.parameters():
+                weight.fast = None
+            self.zero_grad()
 
-        delta_params = self.get_hn_delta_params(support_embeddings)
+            support_embeddings = self.apply_embeddings_strategy(support_embeddings)
 
-        if self.hm_save_delta_params and len(self.delta_list) == 0:
-            self.delta_list = [{'delta_params': delta_params}]
+            delta_params = self.get_hn_delta_params(support_embeddings)
 
-        return delta_params
+            if self.hm_save_delta_params and len(self.delta_list) == 0:
+                self.delta_list = [{'delta_params': delta_params}]
+
+            return delta_params
+        else:
+            return [torch.zeros(*i).cuda() for (_, i) in self.target_net_param_shapes.items()]
 
     def forward(self, x):
         scores = self.classifier.forward(x)
@@ -211,11 +237,14 @@ class VBHMAML(VBHMetaTemplate):
         support_embeddings = support_embeddings.reshape(self.n_way, -1)
         query_data = x_var[:, self.n_support:, :, :, :].contiguous().view(self.n_way * self.n_query,
                                                                           *x.size()[2:])  # query data
-        query_data = query_data.reshape(query_data.shape[0], -1)
+        query_data = query_data.reshape(80, -1)
         support_data_labels = self.get_support_data_labels()
 
 
-        delta_params_list = self._get_list_of_delta_params(support_embeddings, support_data_labels)
+        maml_warmup_used = (
+                    (not self.single_test) and self.hm_maml_warmup and (self.epoch < self.hm_maml_warmup_epochs))
+
+        delta_params_list = self._get_list_of_delta_params(maml_warmup_used, support_embeddings, support_data_labels)
 
         self._update_network_weights(delta_params_list, support_embeddings, support_data_labels, train_stage)
 
@@ -223,13 +252,18 @@ class VBHMAML(VBHMetaTemplate):
             scores = self.forward(support_embeddings)
             return scores, None
         else:
-            if self.hm_support_set_loss and train_stage:
+            if self.hm_support_set_loss and train_stage and not maml_warmup_used:
                 query_data = torch.cat((support_embeddings, query_data))
 
             scores = self.forward(query_data)
 
             # sum of delta params for regularization
-            return scores, None
+            if self.hm_lambda != 0:
+                total_delta_sum = sum([delta_params.pow(2.0).sum() for delta_params in delta_params_list])
+
+                return scores, total_delta_sum
+            else:
+                return scores, None
 
     def set_forward_adaptation(self, x, is_feature=False):  # overwrite parrent function
         raise ValueError('MAML performs further adapation simply by increasing task_upate_num')
@@ -244,6 +278,8 @@ class VBHMAML(VBHMetaTemplate):
 
         loss = self.loss_fn(scores, query_data_labels)
 
+        if self.hm_lambda != 0:
+            loss = loss + self.hm_lambda * total_delta_sum
 
         topk_scores, topk_labels = scores.data.topk(1, 1, True, True)
         topk_ind = topk_labels.cpu().numpy().flatten()
@@ -306,6 +342,9 @@ class VBHMAML(VBHMetaTemplate):
         acc_mean = np.mean(acc_all)
 
         metrics = {"accuracy/train": acc_mean}
+
+        if self.hn_adaptation_strategy == 'increasing_alpha':
+            metrics['alpha'] = self.alpha
 
         if self.hm_save_delta_params and len(self.delta_list) > 0:
             delta_params = {"epoch": self.epoch, "delta_list": self.delta_list}

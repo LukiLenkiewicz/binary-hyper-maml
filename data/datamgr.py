@@ -88,18 +88,16 @@ class SetDataManager(DataManager):
 
 
 class EmbDataManager(DataManager):
-    def __init__(self, image_size, n_way, n_support, n_query, n_eposide =100):        
-        super(SetDataManager).__init__()
-        self.image_size = image_size
+    def __init__(self, n_way, n_support, n_query, n_eposide =100):        
+        super().__init__()
         self.n_way = n_way
         self.batch_size = n_support + n_query
         self.n_eposide = n_eposide
 
-    def get_data_loader(self, data_file, aug): #parameters that would change on train/val set
-        dataset = SetEmbDataset( data_file , self.batch_size)
+    def get_data_loader(self, data_file):
+        dataset = SetEmbDataset(data_file, self.batch_size)
         sampler = EpisodicBatchSampler(len(dataset), self.n_way, self.n_eposide )  
 
-        data_loader_params = dict(batch_sampler = sampler, num_workers = 8, pin_memory=True)
+        data_loader_params = dict(batch_sampler=sampler, num_workers=8, pin_memory=True)
         data_loader = torch.utils.data.DataLoader(dataset, **data_loader_params)
         return data_loader
-

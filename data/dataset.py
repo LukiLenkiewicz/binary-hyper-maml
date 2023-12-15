@@ -76,7 +76,7 @@ class SubDataset:
 
 
 class SetEmbDataset:
-    def __init__(self, data_file, batch_size, transform):
+    def __init__(self, data_file, batch_size):
         with open(data_file, 'r') as f:
             self.meta = json.load(f)
  
@@ -116,10 +116,10 @@ class EmbSubDataset:
     def __getitem__(self,i):
         #print( '%d -%d' %(self.cl,i))
         image_path = os.path.join( self.sub_meta[i])
-        img = np.load(image_path)
-        img = self.transform(img)
+        emb = np.load(image_path)
+        emb = self.transform(emb)
         target = self.target_transform(self.cl)
-        return img, target
+        return emb, target
 
     def __len__(self):
         return len(self.sub_meta)
