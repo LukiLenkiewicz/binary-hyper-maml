@@ -30,7 +30,7 @@ class VBHMAML(VBHMetaTemplate):
 
         self.n_task = 4
         self.task_update_num = 5
-        self.train_lr = 0.01
+        self.train_lr = params.hn_train_lr
         self.approx = approx  # first order approx.
 
         self.hn_sup_aggregation = params.hn_sup_aggregation
@@ -88,7 +88,7 @@ class VBHMAML(VBHMetaTemplate):
 
         hypernet = HMLP(shapes, uncond_in_size=3870, cond_in_size=0, layers=hypernet_layers, num_cond_embs=1)
         # hypernet = ChunkedHMLP(shapes, uncond_in_size=3870, cond_in_size=0, chunk_emb_size=8,
-                # layers=hypernet_layers, chunk_size=325, num_cond_embs=1)
+        #         layers=hypernet_layers, chunk_size=325, num_cond_embs=1)
 
         return hypernet
 
@@ -154,7 +154,7 @@ class VBHMAML(VBHMetaTemplate):
         if self.hn_use_mask:
             for k, weight in enumerate(self.classifier.parameters()):
                 update_value = delta_params_list[k]
-                self._update_weight(weight, update_value)
+                self._apply_mask_single_weight(weight, update_value)
 
         for task_step in range(self.task_update_num):
             scores = self.classifier(support_embeddings)
@@ -171,6 +171,12 @@ class VBHMAML(VBHMetaTemplate):
             for k, weight in enumerate(self.classifier.parameters()):
                 update_value = (self.train_lr * grad[k])
                 self._update_weight(weight, update_value)
+
+    def _apply_mask_single_weight(self, weight, update_value):
+        if weight.fast is None:
+            weight.fast = weight * update_value
+        else:
+            weight.fast = weight.fast * update_value
 
     def _get_list_of_delta_params(self, support_embeddings, support_data_labels):
         if self.enhance_embeddings:

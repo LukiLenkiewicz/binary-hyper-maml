@@ -8,4 +8,4 @@ python train_vbh.py --method vbh_maml --dataset cross_char --num_classes 4112 \
   --stop_epoch 64 --lr_scheduler multisteplr --lr 1e-3 \
   --milestones 51 550 \
   --hn_head_len 2 --hn_hidden_size 256 --hm_enhance_embeddings True \
-  --hn_tn_depth 2 --hn_tn_hidden_size 256 --hn_use_mask
+  --hn_tn_depth 2 --hn_tn_hidden_size 256 --hn_use_mask --hn_train_lr 0.01
