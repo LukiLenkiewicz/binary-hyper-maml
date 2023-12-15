@@ -91,5 +91,8 @@ def add_hn_args_to_parser(parser: ArgumentParser) -> ArgumentParser:
     binarymaml_args.add_argument("--bm_chunk_size", default=325, type=int, help="chunk size produced by hypernetwork")
     binarymaml_args.add_argument("--bm_skip_eval", action='store_true', help="change model to eval in validation loop")
 
+    #Binary MAML args
+    binarymaml_args.add_argument("--hn_use_mask", action='store_true', help="use binary mask")
+
 
     return parser

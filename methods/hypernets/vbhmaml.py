@@ -44,6 +44,7 @@ class VBHMAML(VBHMetaTemplate):
         self.hn_val_lr = params.hn_val_lr
         self.hn_val_epochs = params.hn_val_epochs
         self.hn_val_optim = params.hn_val_optim
+        self.hn_use_mask = params.hn_use_mask
 
         self.alpha = 0
         self.hn_alpha_step = params.hn_alpha_step
@@ -150,9 +151,10 @@ class VBHMAML(VBHMetaTemplate):
             weight.fast = None
         self.classifier.zero_grad()
 
-        for k, weight in enumerate(self.classifier.parameters()):
-            update_value = delta_params_list[k]
-            self._update_weight(weight, update_value)
+        if self.hn_use_mask:
+            for k, weight in enumerate(self.classifier.parameters()):
+                update_value = delta_params_list[k]
+                self._update_weight(weight, update_value)
 
         for task_step in range(self.task_update_num):
             scores = self.classifier(support_embeddings)
