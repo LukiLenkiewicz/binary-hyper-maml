@@ -147,3 +147,6 @@ filelists/QMUL/*.json
 record/
 
 .vscode/
+
+#lightning_logs
+lightning_logs
