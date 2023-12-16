@@ -92,8 +92,10 @@ def add_hn_args_to_parser(parser: ArgumentParser) -> ArgumentParser:
     binarymaml_args.add_argument("--bm_skip_eval", action='store_true', help="change model to eval in validation loop")
 
     #VBHMAML
-    binarymaml_args.add_argument("--hn_use_mask", action='store_true', help="use binary mask")
-    binarymaml_args.add_argument("--hn_train_lr", default=0.01, type=float, help="learning rate for maml updates")
+    vbhmaml_args = parser.add_argument_group("VBHMAML arguments")
+    vbhmaml_args.add_argument("--hn_mask_type", default='two_encoders', choices=["none", "hard", "soft"], help="use binary mask")
+    vbhmaml_args.add_argument("--hn_train_lr", default=0.01, type=float, help="learning rate for maml updates")
+    vbhmaml_args.add_argument("--hn_chunked_hypernet", action="store_true", help="Use of hypernetwork with chunking")
 
 
     return parser

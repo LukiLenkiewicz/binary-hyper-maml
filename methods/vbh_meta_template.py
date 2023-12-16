@@ -16,8 +16,6 @@ class VBHMetaTemplate(nn.Module):
         self.n_way      = n_way
         self.n_support  = n_support
         self.n_query    = -1 #(change depends on input) 
-        # self.feat_dim   = self.feature.final_feat_dim
-        self.feat_dim   = 50
         self.change_way = change_way  #some methods allow different_way classification during training and test
 
     @abstractmethod

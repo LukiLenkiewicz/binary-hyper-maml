@@ -12,11 +12,17 @@ import backbone
 from backbone import Linear_fw
 from methods.hypernets.utils import accuracy_from_scores
 from methods.vbh_meta_template import VBHMetaTemplate
-from methods.hypernets.binary_maml_utils import Binarizer
+from methods.hypernets.binary_maml_utils import Binarizer, SoftBinarizer, IdentityMask
 
 from hypnettorch.hnets.chunked_mlp_hnet import ChunkedHMLP, HMLP
 
 EMBEDDING_SIZE = 768
+MASK_MAPPER = {
+    "none": IdentityMask,
+    "hard": Binarizer,
+    "soft": SoftBinarizer
+}
+
 
 class VBHMAML(VBHMetaTemplate):
     def __init__(self, n_way, n_support, n_query, params=None, approx=False):
@@ -44,11 +50,11 @@ class VBHMAML(VBHMetaTemplate):
         self.hn_val_lr = params.hn_val_lr
         self.hn_val_epochs = params.hn_val_epochs
         self.hn_val_optim = params.hn_val_optim
-        self.hn_use_mask = params.hn_use_mask
+        self.hn_mask_type = params.hn_mask_type
+        self.hn_chunked_hypernet = params.hn_chunked_hypernet
 
         self.alpha = 0
         self.hn_alpha_step = params.hn_alpha_step
-
 
         self.single_test = False
         self.epoch = -1
@@ -59,12 +65,15 @@ class VBHMAML(VBHMetaTemplate):
         self.bm_layer_size = params.bm_layer_size
         self.bm_num_layers = params.bm_num_layers
         self.bm_mask_size = params.bm_mask_size
+        self.bm_chunk_emb_size = params.bm_chunk_emb_size
+        self.bm_chunk_size = params.bm_chunk_size
 
 
         self.calculate_embedding_size()
 
         self.classifier = Classifier_FW(EMBEDDING_SIZE, num_layers=self.hn_tn_depth, layer_size=self.hn_tn_hidden_size, num_classes=self.n_way)
         self.hypernet = self._init_hypernet()
+        self.mask_generator = MASK_MAPPER[params.hn_mask_type]
 
     def _init_classifier(self):
         assert self.hn_tn_hidden_size % self.n_way == 0, f"hn_tn_hidden_size {self.hn_tn_hidden_size} should be the multiple of n_way {self.n_way}"
@@ -86,16 +95,18 @@ class VBHMAML(VBHMetaTemplate):
         shapes = [list(layer.shape) for layer in self.classifier.parameters()]
         hypernet_layers = [self.bm_layer_size for _ in range(self.bm_num_layers)]
 
-        hypernet = HMLP(shapes, uncond_in_size=3870, cond_in_size=0, layers=hypernet_layers, num_cond_embs=1)
-        # hypernet = ChunkedHMLP(shapes, uncond_in_size=3870, cond_in_size=0, chunk_emb_size=8,
-        #         layers=hypernet_layers, chunk_size=325, num_cond_embs=1)
+        if self.hn_chunked_hypernet:
+            hypernet = ChunkedHMLP(shapes, uncond_in_size=self.embedding_size, cond_in_size=0, chunk_emb_size=self.bm_chunk_emb_size,
+                layers=hypernet_layers, chunk_size=self.bm_chunk_size, num_cond_embs=1)
+        else:
+            hypernet = HMLP(shapes, uncond_in_size=self.embedding_size, cond_in_size=0, layers=hypernet_layers, num_cond_embs=1)
 
         return hypernet
-
+    
     def calculate_embedding_size(self):
         n_classes_in_embedding = self.n_way
         n_support_per_class = 1 if self.hn_sup_aggregation == 'mean' else self.n_support
-        single_support_embedding_len = self.feat_dim + self.n_way + 1 if self.enhance_embeddings else self.feat_dim
+        single_support_embedding_len = EMBEDDING_SIZE + self.n_way + 1 if self.enhance_embeddings else self.feat_dim
         self.embedding_size = n_classes_in_embedding * n_support_per_class * single_support_embedding_len
 
     def apply_embeddings_strategy(self, embeddings):
@@ -118,32 +129,13 @@ class VBHMAML(VBHMetaTemplate):
         support_embeddings_resh = support_embeddings.reshape(1, -1)
         delta_params = self.hypernet(support_embeddings_resh)
 
-        params_flat = [param.clone().detach().reshape(-1) for param in delta_params]
-        concat = torch.cat(params_flat)
-
-        k_val = torch.quantile(concat, self.bm_mask_size).item()
+        # params_flat = [param.clone().detach().reshape(-1) for param in delta_params]
 
         for i in range(len(delta_params)):
-            delta_params[i] = Binarizer.apply(delta_params[i], k_val)
+            k_val = torch.quantile(delta_params[i], self.bm_mask_size).item()
+            delta_params[i] = self.mask_generator.apply(delta_params[i], k_val)
 
         return delta_params
-
-    def _update_weight(self, weight, update_value):
-        if self.hm_update_operator == 'minus':
-            if weight.fast is None:
-                weight.fast = weight - update_value
-            else:
-                weight.fast = weight.fast - update_value
-        elif self.hm_update_operator == 'plus':
-            if weight.fast is None:
-                weight.fast = weight + update_value
-            else:
-                weight.fast = weight.fast + update_value
-        elif self.hm_update_operator == 'multiply':
-            if weight.fast is None:
-                weight.fast = weight * update_value
-            else:
-                weight.fast = weight.fast * update_value
 
     def _update_network_weights(self, delta_params_list, support_embeddings, support_data_labels, train_stage=False):
         fast_parameters = list(self.classifier.parameters())
@@ -177,6 +169,23 @@ class VBHMAML(VBHMetaTemplate):
             weight.fast = weight * update_value
         else:
             weight.fast = weight.fast * update_value
+
+    def _update_weight(self, weight, update_value):
+        if self.hm_update_operator == 'minus':
+            if weight.fast is None:
+                weight.fast = weight - update_value
+            else:
+                weight.fast = weight.fast - update_value
+        elif self.hm_update_operator == 'plus':
+            if weight.fast is None:
+                weight.fast = weight + update_value
+            else:
+                weight.fast = weight.fast + update_value
+        elif self.hm_update_operator == 'multiply':
+            if weight.fast is None:
+                weight.fast = weight * update_value
+            else:
+                weight.fast = weight.fast * update_value
 
     def _get_list_of_delta_params(self, support_embeddings, support_data_labels):
         if self.enhance_embeddings:

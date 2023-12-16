@@ -1,8 +1,7 @@
 import json
 import sys
 from collections import defaultdict
-from typing import Type, List, Union, Dict, Optional
-from copy import deepcopy
+from typing import List, Union, Dict, Optional
 
 import numpy as np
 import torch
@@ -13,10 +12,9 @@ import torch.optim.lr_scheduler as lr_scheduler
 import os
 
 import configs
-from data.datamgr import SimpleDataManager, SetDataManager, EmbDataManager
-from methods.hypernets import hypernet_types
+from data.datamgr import EmbDataManager
 from methods.hypernets.vbhmaml import VBHMAML
-from io_utils import model_dict, parse_args, get_resume_file, setup_neptune
+from io_utils import parse_args, get_resume_file, setup_neptune
 
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -113,7 +111,8 @@ def train(base_loader, val_loader, model, optimization, start_epoch, stop_epoch,
         metrics = model.train_loop(epoch, base_loader, optimizer)
 
         scheduler.step()
-        model.eval()
+        if not params.bm_skip_eval:
+            model.eval()
 
         delta_params = metrics.pop('delta_params', None)
         if delta_params is not None:
