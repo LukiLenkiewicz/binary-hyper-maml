@@ -143,10 +143,10 @@ class VBHMAML(VBHMetaTemplate):
             weight.fast = None
         self.classifier.zero_grad()
 
-        if self.hn_use_mask:
-            for k, weight in enumerate(self.classifier.parameters()):
-                update_value = delta_params_list[k]
-                self._apply_mask_single_weight(weight, update_value)
+
+        for k, weight in enumerate(self.classifier.parameters()):
+            update_value = delta_params_list[k]
+            self._apply_mask_single_weight(weight, update_value)
 
         for task_step in range(self.task_update_num):
             scores = self.classifier(support_embeddings)
